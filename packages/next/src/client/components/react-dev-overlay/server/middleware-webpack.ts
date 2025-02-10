@@ -1,4 +1,5 @@
 import { constants as FS, promises as fs } from 'fs'
+import { findSourceMap, type SourceMap } from 'module'
 import path from 'path'
 import { fileURLToPath, pathToFileURL } from 'url'
 import {
@@ -127,8 +128,10 @@ async function findOriginalSourcePositionAndContent(
   }
 }
 
-export function getIgnoredSources(sourceMap: RawSourceMap): IgnoredSources {
-  const ignoreList = new Set<number>()
+export function getIgnoredSources(
+  sourceMap: RawSourceMap & { ignoreList?: number[] }
+): IgnoredSources {
+  const ignoreList = new Set<number>(sourceMap.ignoreList ?? [])
   const moduleFilenames = sourceMap?.sources ?? []
 
   for (let index = 0; index < moduleFilenames.length; index++) {
@@ -288,6 +291,26 @@ async function getSource(
 ): Promise<Source | undefined> {
   const { getCompilations } = options
 
+  let nativeSourceMap: SourceMap | undefined
+  try {
+    nativeSourceMap = findSourceMap(sourceURL)
+  } catch (cause) {
+    throw new Error(
+      `${sourceURL}: Invalid source map. Only conformant source maps can be used to find the original code.`,
+      { cause }
+    )
+  }
+
+  if (nativeSourceMap !== undefined) {
+    const sourceMapPayload = nativeSourceMap.payload
+    return {
+      type: 'file',
+      sourceMap: sourceMapPayload,
+      ignoredSources: getIgnoredSources(sourceMapPayload),
+      moduleURL: sourceURL,
+    }
+  }
+
   if (path.isAbsolute(sourceURL)) {
     sourceURL = pathToFileURL(sourceURL).href
   }
@@ -315,7 +338,7 @@ async function getSource(
     .replace(/\?\d+$/, '')
 
   // (rsc)/./src/hello.tsx => ./src/hello.tsx
-  const modulePath = moduleId.replace(/^(\(.*\)\/?)/, '')
+  const moduleURL = moduleId.replace(/^(\(.*\)\/?)/, '')
 
   for (const compilation of getCompilations()) {
     const sourceMap = await getSourceMapFromCompilation(moduleId, compilation)
@@ -327,7 +350,7 @@ async function getSource(
         sourceMap,
         compilation,
         moduleId,
-        moduleURL: modulePath,
+        moduleURL,
         ignoredSources,
       }
     }

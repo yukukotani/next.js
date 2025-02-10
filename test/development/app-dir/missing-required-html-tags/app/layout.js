@@ -1,3 +1,3 @@
 export default function Root({ children }) {
-  return children
+  return <p>hello world</p>
 }

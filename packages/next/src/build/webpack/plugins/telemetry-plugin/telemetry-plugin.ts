@@ -55,27 +55,19 @@ interface FeatureUsage {
 }
 
 /**
- * A vertex in the module graph.
- */
-interface Module {
-  type: string
-  identifier(): string
-}
-
-/**
  * An edge in the module graph.
  */
 interface Connection {
   originModule: unknown
 }
 
-// Map of a feature module to the file it belongs in the next package.
+// Map of a feature module to the request it belongs to
 const FEATURE_MODULE_MAP: ReadonlyMap<Feature, string> = new Map([
-  ['next/image', '/next/image.js'],
-  ['next/future/image', '/next/future/image.js'],
-  ['next/legacy/image', '/next/legacy/image.js'],
-  ['next/script', '/next/script.js'],
-  ['next/dynamic', '/next/dynamic.js'],
+  ['next/image', 'next/image'],
+  ['next/future/image', 'next/future/image'],
+  ['next/legacy/image', 'next/legacy/image'],
+  ['next/script', 'next/script'],
+  ['next/dynamic', 'next/dynamic'],
 ])
 const FEATURE_MODULE_REGEXP_MAP: ReadonlyMap<Feature, RegExp> = new Map([
   ['@next/font/google', /\/@next\/font\/google\/target.css?.+$/],
@@ -127,16 +119,16 @@ const useCacheTracker = createUseCacheTracker()
 /**
  * Determine if there is a feature of interest in the specified 'module'.
  */
-function findFeatureInModule(module: Module): Feature | undefined {
+function findFeatureInModule(module: webpack.Module): Feature | undefined {
   if (module.type !== 'javascript/auto') {
     return
   }
-  const normalizedIdentifier = module.identifier().replace(/\\/g, '/')
-  for (const [feature, path] of FEATURE_MODULE_MAP) {
-    if (normalizedIdentifier.endsWith(path)) {
+  for (const [feature, rawRequest] of FEATURE_MODULE_MAP) {
+    if ((module as webpack.NormalModule).rawRequest === rawRequest) {
       return feature
     }
   }
+  const normalizedIdentifier = module.identifier().replace(/\\/g, '/')
   for (const [feature, regexp] of FEATURE_MODULE_REGEXP_MAP) {
     if (regexp.test(normalizedIdentifier)) {
       return feature
@@ -151,7 +143,7 @@ function findFeatureInModule(module: Module): Feature | undefined {
  */
 function findUniqueOriginModulesInConnections(
   connections: Connection[],
-  originModule: Module
+  originModule: webpack.Module
 ): Set<unknown> {
   const originModules = new Set()
   for (const connection of connections) {
@@ -206,7 +198,7 @@ export class TelemetryPlugin implements webpack.WebpackPluginInstance {
       async (compilation: webpack.Compilation, callback: () => void) => {
         compilation.hooks.finishModules.tapAsync(
           TelemetryPlugin.name,
-          async (modules: Iterable<Module>, modulesFinish: () => void) => {
+          async (modules, modulesFinish) => {
             for (const module of modules) {
               const feature = findFeatureInModule(module)
               if (!feature) {
